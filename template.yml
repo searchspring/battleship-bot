@@ -11,7 +11,7 @@ Resources:
           Type: Api
           Properties:
             Path: /battleship
-            Method: get
+            Method: post
 
 Outputs:
   HelloWorldApi:

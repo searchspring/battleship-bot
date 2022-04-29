@@ -39,7 +39,7 @@ const alphaNumKey = {
 
 const iconKey = {
     "0": ":large_blue_square: ",
-    "00": ":sweat-drops: ",
+    "00": ":sweat_drops: ",
     "a0": ":ship: ",
     "b0": ":passenger_ship: ",
     "c0": ":motor_boat: ",

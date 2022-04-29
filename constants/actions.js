@@ -5,4 +5,4 @@ const LEAVE = 'leave';
 const VIEW = 'view';
 const FIRE = 'fire';
 
-exports.modules = { START, STOP, JOIN, LEAVE, VIEW, FIRE };
+module.exports = { START, STOP, JOIN, LEAVE, VIEW, FIRE };

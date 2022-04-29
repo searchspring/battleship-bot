@@ -1,67 +1,60 @@
-const actions = require('constants/actions');
-const chars = require('constants/chars');
-const gameConsts = require('constants/game');
-const db = require('db');
+const actions = require('./constants/actions');
+const chars = require('./constants/chars');
+const gameConsts = require('./constants/game');
 
-exports.handler = async (event) => {
-    const qs = require('querystring');
-    const requestBody = qs.parse(event.body);
+var game = {};
 
+module.exports.handler =  (requestBody) => {
     const text = requestBody.text.toLowerCase().split(' ');
     const action = text[0];
     const args = text.slice(1);
     
-    console.log('action:', action)
-    console.log('args:', args);
-
-    let board = generateBoard();
-    printBoard(board);
-    
     let message = '';
-    
+    let response_type = "ephemeral";
     try {
         switch (action) {
             case actions.START:
                 message = start(requestBody.channel_name);
+                response_type = "in_channel";
                 break;
             case actions.FIRE:
-                message = fire(requestBody.channel_name, requestBody.user_id, args[0]);
+                message = fire(requestBody.channel_name, requestBody.user_id, args[0], requestBody.user_name);
+                response_type = "in_channel";
                 break;
             case actions.JOIN:
-                message = join(requestBody.channel_name, requestBody.user_id, args[0])
+                message = join(requestBody.channel_name, requestBody.user_id, args[0], requestBody.user_name)
+                response_type = "in_channel";
                 break;
             case actions.LEAVE:
-                message = leave(requestBody.channel_name, requestBody.user_id);
+                message = leave(requestBody.channel_name, requestBody.user_id, requestBody.user_name);
+                response_type = "in_channel";
                 break;
             case actions.STOP:
                 message = stop(requestBody.channel_name);
+                response_type = "in_channel";
                 break;
             case actions.VIEW:
-                message = view(requestBody.user_id);
+                message = view(requestBody.channel_name, requestBody.user_id);
+                response_type = "ephemeral";
                 break;
             default:
                 console.log('unsupported action');
+                break;
         }
     } catch(error) {
+        console.log('error:', error)
         message = error;
+        response_type = "ephemeral";
     }
 
     return {
-        statusCode: 200,
-        body: JSON.stringify({
-            'channel': requestBody.channel_id,
-            'text': message,
-            // 'response_type': 'in_channel',
-            'response_type': 'ephemeral', // Response is only visible for the person who triggered it.
-        }),
-        headers: {
-            'Content-Type': 'application/json'
-        }
+        response_type: response_type,
+        text: message,
     };
 }
 
 function start(gameID) {
-    let game = {
+    let newGame = {
         id: gameID,
         teams: {
             red: [],
@@ -77,8 +70,10 @@ function start(gameID) {
         },
     };
 
-    // write to dynamo
-    db.putBoard(game)
+    // save the game state
+    game = {...newGame};
+
+    return 'Game has started!';
 }
 
 function generateBoard() {
@@ -90,7 +85,7 @@ function generateBoard() {
         }
     }
 
-    // Randomly place the ships onto the board
+    // randomly place the ships onto the board
     Object.keys(gameConsts.ships).forEach(shipType => {
         placeShipRandomly(shipType, gameConsts.ships[shipType].length, board);
     });
@@ -130,7 +125,7 @@ function placeShipRandomly(type, length, board) {
 }
 
 function randomIntFromInterval(min, max) {
-    return Math.floor(Math.random() * (max - min + 1) + min)
+    return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
 function isValidShipLocation(position, direction, length, board) {
@@ -172,38 +167,43 @@ function printBoard(board) {
 }
 
 function renderBoards(channelName, team) {
-    const game = db.getBoard(channelName);
     // generate the boards to render to the specific user
-    let oppBoard = '';
-    let selfBoard = '';
-    
+    const oppTeam = team === gameConsts.teams.red ? gameConsts.teams.blue: gameConsts.teams.red;
+    let oppBoard = renderOppBoard(game.boards[oppTeam], team);
+    let selfBoard = renderSelfBoard(game.boards[team], team);
+    return oppBoard + '\n\n' + selfBoard;
+
 }
 
 function renderSelfBoard(gameBoard, team) {
-    let board = team === game.teams.red ? chars.HEADER_RED : chars.HEADER_BLUE;
+    let board = team === gameConsts.teams.red ? chars.HEADER_RED : chars.HEADER_BLUE;
     for (let i = 0; i < 10; i++) {
-        let row = chars[i];
+        let row = chars.alphaNumKey[i];
         for (let j = 0; j < 10; j++) {
-            let emoji = iconKey[gameBoard[i][j]];
+            let emoji = chars.iconKey[gameBoard[i][j]];
             row += emoji;
         }
+        row += chars.NEWLINE;
+        board += row;
     }
     return board;
 }
 
 function renderOppBoard(gameBoard, team) {
-    let board = team === game.teams.red ? chars.HEADER_BLUE : chars.HEADER_RED;
+    let board = team === gameConsts.teams.red ? chars.HEADER_BLUE : chars.HEADER_RED;
     for (let i = 0; i < 10; i++) {
-        let row = chars[i];
+        let row = chars.alphaNumKey[i];
         for (let j = 0; j < 10; j++) {
-            let emoji 
+            let emoji;
             if (gameBoard[i][j].match(/[a-z]0/)){
-                // emoji = iconKey[]
+                emoji = chars.iconKey['0'];
             }else {
-                emoji = iconKey[gameBoard[i][j]];
+                emoji = chars.iconKey[gameBoard[i][j]];
             }
             row += emoji;
         }
+        row += chars.NEWLINE;
+        board += row;
     }
     return board;
 }
@@ -211,11 +211,11 @@ function renderOppBoard(gameBoard, team) {
 function getTeam(userID) {
     const team = '';
     if (game.teams.red.includes(userID)) {
-        return game.teams.red;
+        return gameConsts.teams.red;
     } else if (game.teams.blue.includes(userID)) {
-        return game.teams.blue;
+        return gameConsts.teams.blue;
     }
-    throw 'You are not part of a team yet! Try running the /battleship join <red|blue> command to join a team.';
+    throw 'You are not part of a team yet! Try running "/battleship join <red|blue>" to join a team.';
 }
 
 function view(channelName, userID) {
@@ -223,61 +223,79 @@ function view(channelName, userID) {
     return renderBoards(channelName, team);
 }
 
-function fire(channelName, userID, location) {
+function fire(channelName, userID, location, userName) {
+
+    if (!location) return "Need a location for your missle";
+
     // Fire action here
-    // get game from dynamo
     location = location.toLowerCase();
-    location = location.split();
-    let game = db.getBoard(channelName);
-    const team = getTeam(userID);
+    location = location.split('');
+    location[0] = location[0].charCodeAt(0) - 97;
+    location[1] = location.length > 2 ? location[1] + location[2] - 1 : location[1] - 1;
+    const myTeam = getTeam(userID);
+    const team = myTeam === gameConsts.teams.red ? gameConsts.teams.blue : gameConsts.teams.red;
+    
     if (game.boards[team][location[0]][location[1]] === '0') {
         game.boards[team][location[0]][location[1]] = '00';
         message = "MISS!";
-    }
-
-    if (game.boards[team][location[0]][location[1]] === '00') {
-        throw "You've already fired at this location and missed! Try again";
-    }
-    
-    if (game.boards[team][location[0]][location[1]].split()[1] === '1') {
-        throw "You've already fired at this location and HIT! Try again";
-    }
-
-    if (game.boards[team][location[0]][location[1]] === 'a0') {
+    } else if (game.boards[team][location[0]][location[1]] === '00') {
+        return "Stop wasting your missles!! You've already fired at this location and missed! Try again";
+    } else if (game.boards[team][location[0]][location[1]].split('')[1] === '1') {
+        return "Stop wasting your missles!! You've already fired at this location and HIT! Try again";
+    } else if (game.boards[team][location[0]][location[1]] === 'a0') {
         game.boards[team][location[0]][location[1]] = 'a1';
-        message = "HIT! You've hit the Carrier!";
-    }
-
-    if (game.boards[team][location[0]][location[1]] === 'b0') {
+        message = "HIT! " + userName + " has hit the " + team + " team's Carrier!";
+        game.hitCount[team]++
+        if (isShipSunk(team, 'a0')) {
+            message = userName + " has sank the "  + team + " team's Carrier!";
+        }
+    } else if (game.boards[team][location[0]][location[1]] === 'b0') {
         game.boards[team][location[0]][location[1]] = 'b1';
-        message = "HIT! You've hit the Battleship!";
-    }
-
-    if (game.boards[team][location[0]][location[1]] === 'c0') {
+        message = "HIT!  " + userName + " has hit the " + team + " team's Battleship!";
+        game.hitCount[team]++
+        if (isShipSunk(team, 'b0')) {
+            message = userName + " has sank the "  + team + " team's Battleship!";
+        }
+    } else if (game.boards[team][location[0]][location[1]] === 'c0') {
         game.boards[team][location[0]][location[1]] = 'c1';
-        message = "HIT! You've hit the Cruiser!";
-    }
+        message = "HIT!  " + userName + " has hit the " + team + " team's Cruiser!";
 
-    if (game.boards[team][location[0]][location[1]] === 'd0') {
+        game.hitCount[team]++
+        if (isShipSunk(team, 'c0')) {
+            message = userName + " has sank the "  + team + " team's Cruiser!";
+        }
+    } else if (game.boards[team][location[0]][location[1]] === 'd0') {
         game.boards[team][location[0]][location[1]] = 'd1';
-        message = "HIT! You've hit the Submarine!";
-    }
+        game.hitCount[team]++
 
-    if (game.boards[team][location[0]][location[1]] === 'e0') {
+        message = "HIT!  " + userName + " has hit the " + team + " team's Submarine!";
+
+        if (isShipSunk(team, 'd0')) {
+            message = userName + " has sank the "  + team + " team's Submarine!";
+        }
+    } else if (game.boards[team][location[0]][location[1]] === 'e0') {
         game.boards[team][location[0]][location[1]] = 'e1';
-        message = "HIT! You've hit the Destroyer!";
+        game.hitCount[team]++
+        message = "HIT!  " + userName + " has hit the " + team + " team's Destroyer!";
+        
+        if (isShipSunk(team, 'e0')) {
+            message = userName + " has sank the "  + team + " team's Destroyer!";
+        }
     }
 
-    
-    db.putBoard(game);
-    return message;
-    // save the game state
+    if (game.hitCount.red > 17) {
+        game = {};
+        return 'Red team wins! Please play again.';
+    } else if (game.hitCount.blue > 17) {
+        game = {};
+        return 'Blue team wins! Please play again.';
+    }
+
+    const board = renderOppBoard(game.boards[team], myTeam);
+    return board + '\n' + message;
 }
 
-function join(channelName, user, team) {
-    // join user to team here action here
-    let game = db.getBoard(channelName);
-
+function join(channelName, user, team, userName) {
     // team was not specified or didn't match a real team. 
     // place user in team with fewest members, or random if equal
     if (!team || !gameConsts.teams[team]) {
@@ -292,46 +310,32 @@ function join(channelName, user, team) {
             team = 'blue';
         }
     }
-
+    
     game.teams[team].push(user);
-
-    // persist
-    return db.putBoard(game);
+    return userName + ' has joined team ' + team;
 }
 
-function leave(channelName, user) {
+function leave(channelName, userID, userName) {
     // remove user from team (need to figure out the team they are in or add team you're leaving to the command)
-
-    // get the game board
-    let game = db.getBoard(channelName);
-
-    // assume user is on red team
-    let location = game.teams.red.indexOf(user);
-    let team = 'red';
-
-    if (location == -1) {
-        // didn't find user on red team, look on blue team
-        location = game.teams.blue.indexOf(user);
-        if (location !== -1) {
-            // found on blue team
-            team = 'blue';
-        } else {
-            // not found at all
-            team, location = false;
-        }
-    }
-    
-    if (team && location) {
-        // remove user
-        game.teams[team].slice(location);
-        
-        // persist
-        return db.putBoard(game);
-    } else {
-        throw "User was not removed from team, because they were not found.";
-    }
+    const team = getTeam(userID);
+    const newTeam = game.teams[team].filter(id => id !== userID);
+    game.teams[team] = newTeam;
+    return userName + ' has left team ' + team;
 }
 
 function stop(channelName) {
-    // end the game! stop it! kill it with fire!
+    const msg = `The game has ended. Final score is: Red - ${game.hitCount.red}, Blue - ${game.hitCount.blue}`;
+    game = {};
+    return msg;
+}
+
+function isShipSunk(team, ship) {
+    for (let i = 0; i < 10; i++) {
+        if (game.boards[team][i].includes(ship)){
+            return false;
+        }
+    }
+    
+    return true;
+    
 }

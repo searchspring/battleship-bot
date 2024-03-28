@@ -18,7 +18,7 @@
   },
   "homepage": "https://github.com/searchspring/battleship-bot#readme",
   "dependencies": {
-    "express": "^4.18.0",
+    "express": "^4.19.2",
     "nodemon": "^2.0.16"
   }
 }
